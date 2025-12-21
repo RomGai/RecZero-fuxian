@@ -1,0 +1,88 @@
+""" Preprocess dataset for amazon recommendation task """
+
+import os
+from datasets import Dataset, load_dataset
+from tqdm import tqdm
+from verl.utils.hdfs_io import copy, makedirs
+import argparse
+import json
+
+def make_prefix_rec(dp, template_type):
+    history = dp['history']
+    final_item_meta = dp['final_item_meta']
+    if template_type == 'base':
+        prefix = f"""The user asks for product recommendations, and the Assistant helps to make recommendations. Based on the user's interaction history, the assistant first analyzes the user's preferences and requirements, then provides the user with the final recommendation from the provided list of candidate products. The analysis process and recommendation are enclosed within <think> </think> and <answer> </answer> tags, respectively, i.e., <think> analysis process here </think><answer> recommended product here</answer>. Now the user is seeking a product recommendation from you. After thinking, when you finally reach a conclusion, please provide only the corresponding recommended product name within the tags.\n\nUser:{quiz}\nAssistant: <think>"""
+    elif template_type == 'qwen-instruct':
+        prefix = f"""<|im_start|>system\nYou are a helpful shopping assistant. Based on the user's purchase history, You first analysis the user's preferences and requirements, then analyzes the next item in the mind and then provides the user with the numerical rating of the next item. The rating is a discrete value from 1 to 5. The analysis process and rating are enclosed within <think> </think> and <answer> </answer> tags, respectively, i.e., <think> analysis process here </think><answer> rating of the next item here</answer>. After thinking, when you finally reach a conclusion, please provide only the rating of the next item within <answer> </answer> tags. i.e., <answer>3</answer>. Now how they will rate the new item? \n<|im_end|>\n<|im_start|>user\npurchase history: {history}\n next item: {final_item_meta}\n<|im_end|>\n<|im_start|>assistant\n<think>"""
+    return prefix
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    # to change
+    parser.add_argument('--local_dir', default='/home/jiangjunguang.jjg/code_linlin/Logic-RL-main/data/amazon_movie_rating_origin/Movies_and_TV_rating_instruct')
+    parser.add_argument('--hdfs_dir', default=None)
+    # to change
+    parser.add_argument('--data_path', default='/home/jiangjunguang.jjg/code_linlin/Logic-RL-main/data/amazon_movie_rating_origin/Movies_and_TV_rating_task.jsonl')
+    parser.add_argument('--train_size', type=int, default=8000)
+    parser.add_argument('--test_size', type=int, default=1000)
+    parser.add_argument('--template_type', type=str, default='qwen-instruct')
+    
+    args = parser.parse_args()
+    
+    data_source = 'amazon_rate'
+    TRAIN_SIZE = args.train_size
+    TEST_SIZE = args.test_size
+
+    # Load custom JSONL dataset
+    def gen_from_jsonl(path):
+        with open(path) as f:
+            for line in f:
+                yield json.loads(line)
+    
+    raw_dataset = Dataset.from_generator(gen_from_jsonl, gen_kwargs={'path': args.data_path})
+    print(len(raw_dataset))
+
+    assert len(raw_dataset) >= TRAIN_SIZE + TEST_SIZE
+    train_dataset = raw_dataset.select(range(TRAIN_SIZE))
+    test_dataset = raw_dataset.select(range(TRAIN_SIZE, TRAIN_SIZE + TEST_SIZE))
+
+    def make_map_fn(split):
+        def process_fn(example, idx):
+            question = make_prefix_rec(example, template_type=args.template_type)
+            ground_truth = {
+                "ground_truth": str(int(float(example['ground_truth']))),
+            }
+            data = {
+                "data_source": data_source,
+                "prompt": [{
+                    "role": "user",
+                    "content": question,
+                }],
+                "ability": "rec_rating",
+                "reward_model": {
+                    "style": "rule",
+                    "ground_truth": ground_truth
+                },
+                "extra_info": {
+                    'split': split,
+                    'index': idx,
+                }
+            }
+            return data
+        return process_fn
+
+    train_dataset = train_dataset.map(function=make_map_fn('train'), with_indices=True)
+    test_dataset = test_dataset.map(function=make_map_fn('test'), with_indices=True)
+
+    local_dir = args.local_dir
+    hdfs_dir = args.hdfs_dir
+
+    # Create local directory if not exists
+    os.makedirs(os.path.expanduser(local_dir), exist_ok=True)
+
+    train_dataset.to_parquet(os.path.join(local_dir, 'train.parquet'))
+    test_dataset.to_parquet(os.path.join(local_dir, 'test.parquet'))
+
+    if hdfs_dir is not None:
+        makedirs(hdfs_dir)
+        copy(src=local_dir, dst=hdfs_dir)
