@@ -37,8 +37,6 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.ref.log_prob_micro_batch_size=8 \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     actor_rollout_ref.actor.clip_ratio=0.28 \
-    +actor_rollout_ref.rollout.enable_semantic_constraint=True \
-    +actor_rollout_ref.rollout.semantic_index_path=/home/huangyanwen.hyw/code_linlin/LCRec-RL/Sports/Sports.index.json \
     trainer.critic_warmup=0 \
     trainer.logger=['wandb','tensorboard','mlflow'] \
     trainer.project_name='xxx' \
