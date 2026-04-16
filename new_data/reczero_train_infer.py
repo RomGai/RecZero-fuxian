@@ -73,11 +73,18 @@ def parse_item_summary(path: Path) -> Dict[int, str]:
     out: Dict[int, str] = {}
     with path.open("r", encoding="utf-8") as f:
         reader = csv.DictReader(f, delimiter="\t")
-        for row in reader:
+        for row_idx, row in enumerate(reader, start=2):
             item_id = row.get("item_id")
-            if item_id is None or item_id == "":
+            if item_id is None:
                 continue
-            sid = int(item_id)
+            item_id = str(item_id).strip()
+            if item_id == "" or item_id.lower() == "item_id":
+                continue
+            try:
+                sid = int(item_id)
+            except ValueError:
+                print(f"[Data][WARN] {path.name} line {row_idx}: skip invalid item_id={item_id!r}")
+                continue
             summary = (row.get("summary") or "").strip()
             out[sid] = summary if summary else f"item_{sid}"
     return out
