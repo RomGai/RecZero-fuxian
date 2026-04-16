@@ -42,11 +42,31 @@ def parse_user_items_file(path: Path) -> Dict[int, Tuple[List[int], List[int]]]:
             if len(row) < 3:
                 print(f"[Data][WARN] {path.name} line {row_idx}: expected 3 cols, got {len(row)}")
                 continue
-            user_id = int(row[0])
-            pos = [int(x) for x in row[1].split(",") if x != ""]
-            neg = [int(x) for x in row[2].split(",") if x != ""]
+            raw_user = row[0].strip()
+            if raw_user == "" or raw_user.lower() == "user_id":
+                # Skip accidental header/blank lines
+                continue
+            user_id = int(raw_user)
+            pos = parse_int_csv_list(row[1], path=path, row_idx=row_idx, field_name="pos")
+            neg = parse_int_csv_list(row[2], path=path, row_idx=row_idx, field_name="neg")
             records[user_id] = (pos, neg)
     return records
+
+
+def parse_int_csv_list(raw: str, path: Path, row_idx: int, field_name: str) -> List[int]:
+    values: List[int] = []
+    for token in str(raw).split(","):
+        token = token.strip()
+        if token == "":
+            continue
+        try:
+            values.append(int(token))
+        except ValueError:
+            print(
+                f"[Data][WARN] {path.name} line {row_idx} field={field_name}: "
+                f"skip non-int token={token!r}"
+            )
+    return values
 
 
 def parse_item_summary(path: Path) -> Dict[int, str]:
